@@ -1,0 +1,9 @@
+[package]
+name = "execution"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+rust_decimal.workspace = true
+uuid = { version = "1", features = ["v4", "serde"] }

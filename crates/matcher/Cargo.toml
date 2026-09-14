@@ -1,0 +1,10 @@
+[package]
+name = "matcher"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+thiserror.workspace = true
+chrono.workspace = true
+serde.workspace = true

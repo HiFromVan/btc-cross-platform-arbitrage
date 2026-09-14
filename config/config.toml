@@ -1,0 +1,16 @@
+[arbitrage]
+minimum_profit = "1"
+minimum_profit_rate = "0.005"
+max_trade_amount = "1000"
+max_unhedged_exposure = "100"
+slippage_buffer = "0.002"
+
+[execution]
+mode = "simulation"
+
+[binance]
+enabled = true
+
+[polymarket]
+enabled = true
+

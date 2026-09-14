@@ -6,7 +6,11 @@
 
 本文是整理后的项目需求与后续开发提示词，可作为资深量化交易系统工程师的实施说明。
 
-当前仅创建项目目录与本文档，尚未初始化 Cargo、编写业务代码、接入行情或执行测试。以下结构、接口、命令和功能均为待实现要求，不代表已经可用。
+当前已建立 Cargo workspace、领域模型、结算配对分级、套利计算、模拟执行，以及 Binance Prediction Trading / Polymarket 的只读行情观察台。真实交易仍然禁用。
+
+观察台默认把数据写入 `.data/observer.sqlite3`（SQLite WAL）。每秒样本包括双边报价、扣费净空间、首档数量、整轮抓取耗时、跨平台盘口时间差和距结算时间；市场结束后继续回查双方结算结果。历史排名还统计最长连续正信号和首档最大理论利润，避免把同一窗口内重复出现的信号误认为独立交易机会。
+
+macOS 本地常驻可使用 `config/com.van.arbitrage-observer.plist`。它在用户登录时启动 `target/release/app serve`，异常退出后自动重启，日志保存到 `.data/observer.log` 与 `.data/observer.error.log`。电脑关机期间无法采集行情，但已经写入 SQLite 的数据不会丢失。
 
 ## 2. 项目目标与策略范围
 
@@ -297,6 +301,7 @@ cargo run -- orderbook
 cargo run -- scan
 cargo run -- simulator
 cargo run -- status
+cargo run -- serve
 ```
 
 - `markets`：列出市场及匹配、结算验证情况。
@@ -304,6 +309,7 @@ cargo run -- status
 - `scan`：只扫描、显示机会，不下单。
 - `simulator`：生成两个平台的 BTC 5 分钟 Up/Down Mock 市场和盘口，计算机会并模拟执行。
 - `status`：显示运行模式、数据源状态、模拟订单、持仓及未对冲敞口；实现时明确独立 CLI 进程读取运行状态的方式。
+- `serve`：启动 `http://127.0.0.1:8787` 本地观察台，发现 Crypto Up/Down 市场，匹配 Polymarket 同 slug 事件并将观察写入 SQLite。需要 Binance 只读 API 凭据，因为其市场数据也是签名端点。
 
 模拟器随机产生价格、流动性、价差和延迟，并实时打印机会；支持固定随机种子复现。Mock 结算规则必须显式设置，不能被当作真实平台规则的证明。
 
