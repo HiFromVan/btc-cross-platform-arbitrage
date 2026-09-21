@@ -1,4 +1,6 @@
 /target/
 .env
 .data/
+.ai/
+deploy/
 .DS_Store

@@ -1,6 +1,6 @@
 # BTC 5 分钟跨平台套利机器人
 
-> Binance Prediction Market ↔ Polymarket CLOB 的 BTC 5 分钟 Up/Down 跨平台套利项目。使用 Rust，第一阶段仅提供行情读取、机会计算和模拟执行，绝对禁止真实交易。
+> Binance Prediction Market ↔ Polymarket CLOB 的 BTC/ETH/BNB Up/Down 跨平台价差研究项目。使用 Rust，第一阶段仅提供行情读取、机会计算和模拟执行，绝对禁止真实交易。
 
 ## 1. 文档用途与当前状态
 
@@ -8,7 +8,9 @@
 
 当前已建立 Cargo workspace、领域模型、结算配对分级、套利计算、模拟执行，以及 Binance Prediction Trading / Polymarket 的只读行情观察台。真实交易仍然禁用。
 
-观察台默认把数据写入 `.data/observer.sqlite3`（SQLite WAL）。每秒样本包括双边报价、扣费净空间、首档数量、整轮抓取耗时、跨平台盘口时间差和距结算时间；市场结束后继续回查双方结算结果。历史排名还统计最长连续正信号和首档最大理论利润，避免把同一窗口内重复出现的信号误认为独立交易机会。
+观察台默认把数据写入 `.data/observer.sqlite3`（SQLite WAL）。每轮样本包括双边报价、完整卖盘深度、扣除费用与风险缓冲后的净空间、整轮抓取耗时、跨平台盘口时间差、盘口年龄和距结算时间；市场结束后继续回查双方结算结果。历史排名还统计最长连续正信号和按深度计算的最大理论利润，避免把同一窗口内重复出现的信号误认为独立交易机会。
+
+“币安基差”还统计现货—USDT 永续资金费率策略和现货—USDT-M 交割合约现金套利。交割模型按交易规则取整数量，扣除往返手续费、滑移、2 bps 交割缓冲和 10% 年化资金占用成本；资金占用前利润为正时，会以 250ms、1s、5s 延迟重读订单簿并验证原限价下两腿完整可成交性。全部为公开行情统计和影子模拟，不发送真实订单。
 
 macOS 本地常驻可使用 `config/com.van.arbitrage-observer.plist`。它在用户登录时启动 `target/release/app serve`，异常退出后自动重启，日志保存到 `.data/observer.log` 与 `.data/observer.error.log`。电脑关机期间无法采集行情，但已经写入 SQLite 的数据不会丢失。
 
@@ -300,6 +302,7 @@ cargo run -- markets
 cargo run -- orderbook
 cargo run -- scan
 cargo run -- simulator
+cargo run -- shadow-fok --asset BTC --direction A --quantity 10 --delay-ms 250
 cargo run -- status
 cargo run -- serve
 ```
@@ -307,9 +310,16 @@ cargo run -- serve
 - `markets`：列出市场及匹配、结算验证情况。
 - `orderbook`：查看指定平台、市场与 outcome 的订单簿深度。
 - `scan`：只扫描、显示机会，不下单。
-- `simulator`：生成两个平台的 BTC 5 分钟 Up/Down Mock 市场和盘口，计算机会并模拟执行。
+- `simulator`：使用固定 Mock 盘口执行双腿 FOK 模拟。支持 `--quantity` 指定份数，或用 `--budget`、两腿限价和 `--quantity-step` 计算份数；`--second-leg-price` 可模拟提交期间第二腿价格移动。
+- `shadow-fok`：只读获取当前规则对齐的 1h 真实盘口，先做双腿 FOK 预检，等待指定模拟延迟后重新获取盘口并判断成交、取消和未对冲状态。该命令不调用任何下单或撤单接口。
+- `serve` 还会在规则对齐的 1h 方向首次通过静态风控时自动执行同类 250ms 二次报价测试，并将结果写入 `shadow_executions`。观察台的“模拟账本”页显示两腿成交状态和未对冲数量。
 - `status`：显示运行模式、数据源状态、模拟订单、持仓及未对冲敞口；实现时明确独立 CLI 进程读取运行状态的方式。
 - `serve`：启动 `http://127.0.0.1:8787` 本地观察台，发现 Crypto Up/Down 市场，匹配 Polymarket 同 slug 事件并将观察写入 SQLite。需要 Binance 只读 API 凭据，因为其市场数据也是签名端点。
+- 观察台的“币安内部”页统计同一 Binance 市场同时买入 Up 与 Down 的候选机会，区分卖一错价、完整深度扣费后正空间、静态合格和连续确认；该功能仍然只读取行情，不发送订单。
+- 观察台的“PM 内部”页实时统计同一个 Polymarket condition 同时买入 Up/Yes 与 Down/No 的候选机会。计算使用最多 10 份完整卖盘深度、逐档 taker 手续费、第二腿滑移及资金占用缓冲，并保存盘口年龄、两腿时间差、静态合格和连续确认数据；旧历史不会回填该字段。
+- PM 内部正净信号首次通过静态条件时，会自动保存两腿原始 FOK 限价，等待 250ms 后重新读取公开盘口并模拟双腿成交、取消和未对冲状态；记录复用观察台“自动影子执行”列表，不会调用真实下单接口。
+- 观察台的“币安基差”页实时统计 BTC、ETH、SOL、XRP 的现货多仓加 USDT 永续空仓模型。模型按最多 1,000 USDT 完整深度计算入场基差，计入保守的双边往返 taker 手续费和滑移，读取当前资金费率与动态结算周期，并展示 24 小时、7 天投影、资金费 APR 和预计回本轮数。该功能只使用公开 API，不读取账户、持仓或余额。
+- 同一页面动态发现 Binance 实际挂牌的 USDT-M 交割合约，统计“买现货 + 空交割合约”的现金套利。按完整深度扣除保守往返费用和滑移后展示到期净利润、净收益率与按剩余期限折算的净 APR；当前挂牌范围为 BTC、ETH 当季和次季，SOL、XRP 无对应合约时不会展示。
 
 模拟器随机产生价格、流动性、价差和延迟，并实时打印机会；支持固定随机种子复现。Mock 结算规则必须显式设置，不能被当作真实平台规则的证明。
 

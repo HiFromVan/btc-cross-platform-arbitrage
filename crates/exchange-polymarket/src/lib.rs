@@ -89,11 +89,21 @@ pub struct PolymarketMarket {
     pub outcome_prices: String,
     pub clob_token_ids: String,
     pub fees_enabled: bool,
+    #[serde(default)]
+    pub fee_schedule: Option<PolymarketFeeSchedule>,
     pub resolution_source: String,
+    #[serde(default)]
+    pub event_start_time: Option<String>,
     #[serde(default)]
     pub closed: bool,
     #[serde(default)]
     pub uma_resolution_status: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PolymarketFeeSchedule {
+    pub rate: Decimal,
+    pub exponent: i64,
 }
 
 impl PolymarketMarket {
@@ -150,7 +160,12 @@ pub struct PolymarketOrderBook {
 
 impl PolymarketOrderBook {
     pub fn best_ask(&self) -> Result<Option<(Decimal, Decimal)>, PolymarketError> {
-        self.asks
+        Ok(self.ask_levels()?.into_iter().next())
+    }
+
+    pub fn ask_levels(&self) -> Result<Vec<(Decimal, Decimal)>, PolymarketError> {
+        let mut levels = self
+            .asks
             .iter()
             .map(|level| {
                 Ok((
@@ -160,8 +175,9 @@ impl PolymarketOrderBook {
                         .map_err(|_| PolymarketError::Invalid("订单数量".into()))?,
                 ))
             })
-            .collect::<Result<Vec<_>, PolymarketError>>()
-            .map(|levels| levels.into_iter().min_by_key(|(price, _)| *price))
+            .collect::<Result<Vec<_>, PolymarketError>>()?;
+        levels.sort_by_key(|(price, _)| *price);
+        Ok(levels)
     }
 }
 
@@ -186,7 +202,9 @@ mod tests {
             outcome_prices: "[]".into(),
             clob_token_ids: "[\"down-token\",\"up-token\"]".into(),
             fees_enabled: true,
+            fee_schedule: None,
             resolution_source: "source".into(),
+            event_start_time: None,
             closed: false,
             uma_resolution_status: None,
         };
@@ -207,7 +225,9 @@ mod tests {
             outcome_prices: "[\"0\",\"1\"]".into(),
             clob_token_ids: "[]".into(),
             fees_enabled: true,
+            fee_schedule: None,
             resolution_source: "source".into(),
+            event_start_time: None,
             closed: true,
             uma_resolution_status: Some("resolved".into()),
         };

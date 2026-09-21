@@ -11,10 +11,14 @@ launchctl kickstart -k gui/$(id -u)/com.van.arbitrage-observer
 
 ```bash
 curl -sS http://127.0.0.1:8787/api/state
+curl -sS 'http://127.0.0.1:8787/api/shadow-executions?limit=20'
 tail -f .data/observer.log
 tail -f .data/observer.error.log
 sqlite3 .data/observer.sqlite3 "select count(*), max(observed_at_ms) from observations;"
+sqlite3 .data/observer.sqlite3 "select status, count(*) from shadow_executions group by status;"
 ```
+
+RTDS WebSocket 会读取 `all_proxy`、`ALL_PROXY`、`https_proxy` 或 `HTTPS_PROXY`，当前支持无认证 HTTP 代理并通过 CONNECT 建立 TLS 隧道。HTTP 行情仍由 `reqwest` 处理。
 
 停止或重启可使用 `launchctl kickstart -k gui/$(id -u)/com.van.arbitrage-observer`，数据会保留在 SQLite。接通电源并只关闭显示器时，LaunchAgent 和 `caffeinate -s` 可继续运行；关机、断电或合盖进入睡眠后无法采集。定期备份 `.data/observer.sqlite3` 及其 WAL 文件。
 

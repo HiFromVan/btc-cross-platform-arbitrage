@@ -26,6 +26,7 @@ pub struct BinanceClient {
     api_key: String,
     api_secret: String,
     base_url: String,
+    futures_base_url: String,
 }
 
 impl BinanceClient {
@@ -43,6 +44,7 @@ impl BinanceClient {
             api_key,
             api_secret,
             base_url: "https://api.binance.com".into(),
+            futures_base_url: "https://fapi.binance.com".into(),
         })
     }
 
@@ -131,12 +133,261 @@ impl BinanceClient {
         Decimal::from_str(&response.price).map_err(|_| BinanceError::Invalid("现货价格".into()))?;
         Ok(response)
     }
+
+    pub async fn spot_depth(
+        &self,
+        symbol: &str,
+        limit: u16,
+    ) -> Result<BinancePublicOrderBook, BinanceError> {
+        self.public_depth(&self.base_url, "/api/v3/depth", symbol, limit)
+            .await
+    }
+
+    pub async fn usdt_futures_depth(
+        &self,
+        symbol: &str,
+        limit: u16,
+    ) -> Result<BinancePublicOrderBook, BinanceError> {
+        self.public_depth(&self.futures_base_url, "/fapi/v1/depth", symbol, limit)
+            .await
+    }
+
+    async fn public_depth(
+        &self,
+        base_url: &str,
+        path: &str,
+        symbol: &str,
+        limit: u16,
+    ) -> Result<BinancePublicOrderBook, BinanceError> {
+        let limit = limit.to_string();
+        let response = self
+            .http
+            .get(format!("{base_url}{path}"))
+            .query(&[("symbol", symbol), ("limit", limit.as_str())])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<BinancePublicOrderBook>()
+            .await?;
+        response.validate()?;
+        Ok(response)
+    }
+
+    pub async fn usdt_futures_premium_index(
+        &self,
+        symbol: &str,
+    ) -> Result<BinancePremiumIndex, BinanceError> {
+        let response = self
+            .http
+            .get(format!("{}/fapi/v1/premiumIndex", self.futures_base_url))
+            .query(&[("symbol", symbol)])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<BinancePremiumIndex>()
+            .await?;
+        response.validate()?;
+        Ok(response)
+    }
+
+    pub async fn usdt_futures_funding_info(&self) -> Result<Vec<BinanceFundingInfo>, BinanceError> {
+        Ok(self
+            .http
+            .get(format!("{}/fapi/v1/fundingInfo", self.futures_base_url))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Vec<BinanceFundingInfo>>()
+            .await?)
+    }
+
+    pub async fn usdt_futures_exchange_info(
+        &self,
+    ) -> Result<BinanceFuturesExchangeInfo, BinanceError> {
+        Ok(self
+            .http
+            .get(format!("{}/fapi/v1/exchangeInfo", self.futures_base_url))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<BinanceFuturesExchangeInfo>()
+            .await?)
+    }
+
+    pub async fn spot_exchange_info(&self) -> Result<BinanceSpotExchangeInfo, BinanceError> {
+        Ok(self
+            .http
+            .get(format!("{}/api/v3/exchangeInfo", self.base_url))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<BinanceSpotExchangeInfo>()
+            .await?)
+    }
+
+    pub async fn usdt_delivery_premium_index(
+        &self,
+        symbol: &str,
+    ) -> Result<BinanceDeliveryPremiumIndex, BinanceError> {
+        let response = self
+            .http
+            .get(format!("{}/fapi/v1/premiumIndex", self.futures_base_url))
+            .query(&[("symbol", symbol)])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<BinanceDeliveryPremiumIndex>()
+            .await?;
+        response.validate()?;
+        Ok(response)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BinanceSpotPrice {
     pub symbol: String,
     pub price: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinancePublicOrderBook {
+    pub last_update_id: i64,
+    #[serde(default)]
+    pub event_time: Option<i64>,
+    pub bids: Vec<[String; 2]>,
+    pub asks: Vec<[String; 2]>,
+}
+
+impl BinancePublicOrderBook {
+    fn validate(&self) -> Result<(), BinanceError> {
+        self.bid_levels()?;
+        self.ask_levels()?;
+        Ok(())
+    }
+
+    pub fn bid_levels(&self) -> Result<Vec<(Decimal, Decimal)>, BinanceError> {
+        decimal_public_levels(&self.bids, true)
+    }
+
+    pub fn ask_levels(&self) -> Result<Vec<(Decimal, Decimal)>, BinanceError> {
+        decimal_public_levels(&self.asks, false)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinancePremiumIndex {
+    pub symbol: String,
+    pub mark_price: String,
+    pub index_price: String,
+    pub last_funding_rate: String,
+    pub next_funding_time: i64,
+    pub time: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinanceFundingInfo {
+    pub symbol: String,
+    pub funding_interval_hours: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinanceFuturesExchangeInfo {
+    pub symbols: Vec<BinanceFuturesSymbol>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinanceFuturesSymbol {
+    pub symbol: String,
+    pub pair: String,
+    pub contract_type: String,
+    pub delivery_date: i64,
+    pub status: String,
+    #[serde(default)]
+    pub filters: Vec<BinanceSymbolFilter>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinanceSpotExchangeInfo {
+    pub symbols: Vec<BinanceSpotSymbol>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinanceSpotSymbol {
+    pub symbol: String,
+    pub status: String,
+    #[serde(default)]
+    pub filters: Vec<BinanceSymbolFilter>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinanceSymbolFilter {
+    pub filter_type: String,
+    #[serde(default)]
+    pub tick_size: Option<String>,
+    #[serde(default)]
+    pub step_size: Option<String>,
+    #[serde(default)]
+    pub min_qty: Option<String>,
+}
+
+impl BinanceSymbolFilter {
+    pub fn decimal_step_size(&self) -> Option<Decimal> {
+        self.step_size
+            .as_deref()
+            .and_then(|value| Decimal::from_str(value).ok())
+    }
+
+    pub fn decimal_tick_size(&self) -> Option<Decimal> {
+        self.tick_size
+            .as_deref()
+            .and_then(|value| Decimal::from_str(value).ok())
+    }
+
+    pub fn decimal_min_qty(&self) -> Option<Decimal> {
+        self.min_qty
+            .as_deref()
+            .and_then(|value| Decimal::from_str(value).ok())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinanceDeliveryPremiumIndex {
+    pub symbol: String,
+    pub mark_price: String,
+    pub index_price: String,
+    pub time: i64,
+}
+
+impl BinanceDeliveryPremiumIndex {
+    fn validate(&self) -> Result<(), BinanceError> {
+        Decimal::from_str(&self.mark_price)
+            .map_err(|_| BinanceError::Invalid("交割合约标记价格".into()))?;
+        Decimal::from_str(&self.index_price)
+            .map_err(|_| BinanceError::Invalid("交割合约指数价格".into()))?;
+        Ok(())
+    }
+}
+
+impl BinancePremiumIndex {
+    fn validate(&self) -> Result<(), BinanceError> {
+        for (name, value) in [
+            ("标记价格", &self.mark_price),
+            ("指数价格", &self.index_price),
+            ("资金费率", &self.last_funding_rate),
+        ] {
+            Decimal::from_str(value).map_err(|_| BinanceError::Invalid(name.into()))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -237,7 +488,11 @@ pub struct BinanceOrderBook {
 
 impl BinanceOrderBook {
     pub fn best_ask(&self) -> Result<Option<(Decimal, Decimal)>, BinanceError> {
-        decimal_best_ask(&self.asks)
+        Ok(self.ask_levels()?.into_iter().next())
+    }
+
+    pub fn ask_levels(&self) -> Result<Vec<(Decimal, Decimal)>, BinanceError> {
+        decimal_ask_levels(&self.asks)
     }
 }
 
@@ -247,10 +502,10 @@ pub struct BinancePriceLevel {
     pub size: String,
 }
 
-fn decimal_best_ask(
+fn decimal_ask_levels(
     levels: &[BinancePriceLevel],
-) -> Result<Option<(Decimal, Decimal)>, BinanceError> {
-    levels
+) -> Result<Vec<(Decimal, Decimal)>, BinanceError> {
+    let mut levels = levels
         .iter()
         .map(|level| {
             Ok((
@@ -260,8 +515,32 @@ fn decimal_best_ask(
                     .map_err(|_| BinanceError::Invalid("订单数量".into()))?,
             ))
         })
-        .collect::<Result<Vec<_>, BinanceError>>()
-        .map(|levels| levels.into_iter().min_by_key(|(price, _)| *price))
+        .collect::<Result<Vec<_>, BinanceError>>()?;
+    levels.sort_by_key(|(price, _)| *price);
+    Ok(levels)
+}
+
+fn decimal_public_levels(
+    levels: &[[String; 2]],
+    descending: bool,
+) -> Result<Vec<(Decimal, Decimal)>, BinanceError> {
+    let mut values = levels
+        .iter()
+        .map(|level| {
+            Ok((
+                Decimal::from_str(&level[0])
+                    .map_err(|_| BinanceError::Invalid("公开订单价格".into()))?,
+                Decimal::from_str(&level[1])
+                    .map_err(|_| BinanceError::Invalid("公开订单数量".into()))?,
+            ))
+        })
+        .collect::<Result<Vec<_>, BinanceError>>()?;
+    if descending {
+        values.sort_by(|left, right| right.0.cmp(&left.0));
+    } else {
+        values.sort_by_key(|(price, _)| *price);
+    }
+    Ok(values)
 }
 
 #[cfg(test)]
@@ -281,8 +560,27 @@ mod tests {
             },
         ];
         assert_eq!(
-            decimal_best_ask(&levels).unwrap(),
+            decimal_ask_levels(&levels).unwrap().first().copied(),
             Some((Decimal::new(7, 2), Decimal::new(35, 1)))
+        );
+    }
+
+    #[test]
+    fn sorts_public_bids_highest_first_and_asks_lowest_first() {
+        let levels = vec![["100.1".into(), "2".into()], ["100.3".into(), "1".into()]];
+        assert_eq!(
+            decimal_public_levels(&levels, true)
+                .unwrap()
+                .first()
+                .copied(),
+            Some((Decimal::new(1003, 1), Decimal::ONE))
+        );
+        assert_eq!(
+            decimal_public_levels(&levels, false)
+                .unwrap()
+                .first()
+                .copied(),
+            Some((Decimal::new(1001, 1), Decimal::from(2)))
         );
     }
 }

@@ -24,6 +24,8 @@ pub enum OrderStatus {
     Submitting,
     PartiallyFilled,
     FullyFilled,
+    Cancelled,
+    Rejected,
     Hedged,
     Failed,
     Unhedged,
